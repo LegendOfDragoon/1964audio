@@ -2,7 +2,14 @@
 #define __RSP_PREFIX__
 
 #ifndef BIG_ENDIAN
-	#include <windows.h>
+#ifdef _XBOX
+#include <xtl.h>
+#define MB_OK 1
+extern int MessageBox(HWND hWnd, LPCTSTR lpText,LPCTSTR lpCaption, UINT uType);
+#else
+#include <windows.h>
+#endif
+	
 #endif // BIG_ENDIAN
 
 // file api and fix function for path

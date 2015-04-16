@@ -6,6 +6,8 @@
 #include "Microcode.h"
 #include "TestMacros.h"
 
+extern void rsp_lpv(_u32 Instruction);
+
 void _ZeldaData(_u32 StartAddress);
 
 void Zelda11A4_11D4(void);

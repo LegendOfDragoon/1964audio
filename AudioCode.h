@@ -1,7 +1,11 @@
 #ifndef _AUDIOCODE_DOT_H_
 #define _AUDIOCODE_DOT_H_
 
+#ifdef _XBOX
+#include <xtl.h>
+#else
 #include <windows.h>
+#endif
 #include <dsound.h>
 
 #define SND_IS_NOT_EMPTY 0x4000000

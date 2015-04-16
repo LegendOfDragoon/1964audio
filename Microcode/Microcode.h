@@ -6,6 +6,14 @@
 #include "../Shared/state.h"
 
 
+// FIXME!!
+// disabling casting warnings for now - too many
+#pragma warning (disable : 4133 ) // warning C4133: 'function' : incompatible types - from 'VECTOR *' to 'unsigned int *'
+#pragma warning (disable : 4102 ) // unreferenced label
+#pragma warning (disable : 4799 ) // No EMMS at end of function
+#pragma warning (disable : 4005 ) // macro redefinition
+
+
 extern _u32			DMEM_Address;
 extern _u32			RDRAM_Address;
 extern char			*pDMEM;

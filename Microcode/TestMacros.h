@@ -54,6 +54,7 @@ HiAccumType accumulator_hi[8];
 	}																						\
 }
 
+/*
 //modified by schibo
 //#define VMADM_operation(index, dest, s1, s2, wrElement, wrHiAccum, wrLoAccum, wrFlag0) {	\
 	if (wrElement || wrHiAccum || wrLoAccum) {												\
@@ -71,6 +72,7 @@ HiAccumType accumulator_hi[8];
 		}																					\
 	}																						\
 }
+*/
 
 #define VMADM_operation(index, dest, s1, s2, wrElement, wrHiAccum, wrLoAccum, wrFlag0) {	\
 	if (wrElement || wrHiAccum || wrLoAccum) {												\

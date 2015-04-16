@@ -5,6 +5,8 @@
 #include "Microcode.h"
 #include "TestMacros.h"
 
+extern void rsp_lpv(_u32 Instruction);
+
 void _StarFoxData(_u32 StartAddress);
 
 

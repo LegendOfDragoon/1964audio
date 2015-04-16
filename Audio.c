@@ -1,14 +1,19 @@
+#ifdef _XBOX
+#include <xtl.h>
+#include "Dsound.h"
+#else
 #include <windows.h>
 #include <dsound.h>
+#include "make/resource.h"
+#endif
 #include <stdio.h>
 #include "audio.h"
-#include "make/resource.h"
 
 //#ifdef RSP_DECOMPILER 
 //#define THREADED 1
 //#endif
 
-#define PLUGIN_VERSION "2.7"
+#define PLUGIN_VERSION "2.7X"
 #define UNDEFINED_UCODE 0xffffffff
 
 #define AI_STATUS_FIFO_FULL	0x80000000		/* Bit 31: full */
@@ -18,22 +23,52 @@
 #define BufferSize			0x2000
 //int BufferSize;
 
-
-
 #define Buffer_Empty		0
 #define Buffer_Playing		1
 #define Buffer_HalfFull		2
 #define Buffer_Full			3
 
+#ifdef _XBOX
+#define DSB_Play	IDirectSoundBuffer_Play
+#define DSB_Stop	IDirectSoundBuffer_Stop
+#define DSB_GetStatus	IDirectSoundBuffer_GetStatus
+#define DSB_SetFormat	IDirectSoundBuffer_SetFormat
+#define DSB_Lock	IDirectSoundBuffer_Lock
+#define DSB_Unlock	IDirectSoundBuffer_Unlock
+#define DSB_SetVolume	IDirectSoundBuffer_SetVolume
+#define DSB_SetHeadroom	IDirectSoundBuffer_SetHeadroom
+#define DSB_SetMixBins	IDirectSoundBuffer_SetMixBins
+#define DSB_SetNotificationPositions	IDirectSoundBuffer_SetNotificationPositions
+#else
+#define DSB_Play	IDirectSoundBuffer8_Play
+#define DSB_Stop	IDirectSoundBuffer8_Stop
+#define DSB_GetStatus	IDirectSoundBuffer8_GetStatus
+#define DSB_GETFORMAT	IDirectSoundBuffer8_GetFormat
+#define DSB_SetFormat	IDirectSoundBuffer8_SetFormat
+#define DSB_Lock	IDirectSoundBuffer8_Lock
+#define DSB_Unlock	IDirectSoundBuffer8_Unlock
+#define DSB_SetVolume	IDirectSoundBuffer8_SetVolume
+#define DSB_SetHeadroom	IDirectSoundBuffer8_SetHeadroom
+#define DSB_SetMixBins	IDirectSoundBuffer8_SetMixBins
+#define DSN_SetNotificationPositions	IDirectSoundNotify_SetNotificationPositions
+#define DS_QueryInterface	IDirectSound8_QueryInterface
+#define DS_Release	IDirectSound8_Release
+#define DSB_Release	IDirectSoundBuffer8_Release
+#endif
+
 void FillBuffer            ( int buffer );
 BOOL FillBufferWithSilence ( LPDIRECTSOUNDBUFFER lpDsb );
 void FillSectionWithSilence( int buffer );
+#ifdef _XBOX
+BOOL SetupDSoundBuffers    ( void );
+#else
 void SetupDSoundBuffers    ( void );
+#endif
 void Soundmemcpy           ( void * dest, const void * src, size_t count );
 void ROM_ByteSwap_3210(void *v, DWORD dwLen);
 void ROM_GetRomNameFromHeader(TCHAR * szName, ROMHeader * pHdr);
 
-void AddEffect();
+//void AddEffect(); // unused b/c of Sim City 2000?
 
 extern void rsp_run();
 extern void rsp_reset();
@@ -48,11 +83,14 @@ HANDLE handleAudioThread=NULL;
 DWORD dwAudioThreadId;
 int audioIsPlaying = FALSE;
 
-
 DWORD Frequency, Dacrate = 0, Snd1Len, SpaceLeft, SndBuffer[3], Playing;
 AUDIO_INFO AudioInfo;
 BYTE *Snd1ReadPos;
 extern BOOL ucodeDetected;
+
+#ifdef _XBOX
+BOOL bAudioBoostMusyX = FALSE;
+#endif
 
 // ---------------- Needed for RSP --------------------------
 char *pRDRAM;
@@ -66,12 +104,14 @@ int MinDumpCount;
 
 LPDIRECTSOUNDBUFFER8  lpdsbuf=NULL;
 LPDIRECTSOUND8        lpds;
+#ifndef _XBOX
 LPDIRECTSOUNDNOTIFY8  lpdsNotify;
+#endif
 HANDLE               rghEvent[NUMCAPTUREEVENTS];
 DSBPOSITIONNOTIFY    rgdscbpn[NUMCAPTUREEVENTS];
 
 extern int gUcode;
-EXPORT void CALL AiDacrateChanged (int SystemType) {
+FUNC_TYPE(void) NAME_DEFINE(AiDacrateChanged) (int SystemType) {
 //	if (Dacrate != *AudioInfo.AI_DACRATE_REG) 
 	{
 		Dacrate = *AudioInfo.AI_DACRATE_REG;
@@ -90,12 +130,12 @@ EXPORT void CALL AiDacrateChanged (int SystemType) {
 			else
 				MessageBox(0, "Cool", "", 0);
 		}
-*/
+*/		
 		SetupDSoundBuffers();
 	}
 }
 
-EXPORT BOOL CALL IsMusyX()
+FUNC_TYPE(BOOL) NAME_DEFINE(IsMusyX)()
 {	
 	//This will only be true for MusyX. Cool!
 	if (gUcode == UNDEFINED_UCODE)
@@ -109,13 +149,11 @@ EXPORT BOOL CALL IsMusyX()
 	{
 		return FALSE;
 	}
-
-
 }
 
-EXPORT void CALL AiLenChanged (void) {
+FUNC_TYPE(void) NAME_DEFINE(AiLenChanged) (void) {
 	int count, offset=0, temp;
-	DWORD dwStatus;
+//	DWORD dwStatus;
 
 	if (!lpdsbuf) {
 		*AudioInfo.AI_STATUS_REG &= ~AI_STATUS_FIFO_FULL;
@@ -134,9 +172,6 @@ EXPORT void CALL AiLenChanged (void) {
         *AudioInfo.AI_STATUS_REG |= AI_STATUS_FIFO_FULL; 
 	
 	//if (*AudioInfo.AI_LEN_REG == 0) { return; } //this breaks sound in Zelda load states!!
-
-
-
 
 	Snd1Len = (*AudioInfo.AI_LEN_REG & 0x3FFF8);
 
@@ -172,12 +207,12 @@ EXPORT void CALL AiLenChanged (void) {
 	}
 }
 
-EXPORT DWORD CALL AiReadLength (void) {
+FUNC_TYPE(DWORD) NAME_DEFINE(AiReadLength) (void) {
 	return Snd1Len;
 }
 
 
-void PlayIt()
+__forceinline void PlayIt()
 {
 int count=0;
 DWORD dwStatus;
@@ -187,22 +222,21 @@ DWORD dwStatus;
 			if (SndBuffer[count] == Buffer_Full) 
 			{
 				Playing = TRUE;
-				IDirectSoundBuffer8_Play(lpdsbuf, 0, 0, DSBPLAY_LOOPING );
+				DSB_Play(lpdsbuf, 0, 0, DSBPLAY_LOOPING );
 				return;
 			}
 		}
 	} else {
-		IDirectSoundBuffer8_GetStatus(lpdsbuf,&dwStatus);
+		DSB_GetStatus(lpdsbuf,&dwStatus);
 		if ((dwStatus & DSBSTATUS_PLAYING) == 0) {
-			IDirectSoundBuffer8_Play(lpdsbuf, 0, 0, DSBPLAY_LOOPING );
+			DSB_Play(lpdsbuf, 0, 0, DSBPLAY_LOOPING );
 		}
 	}
 
 }
 
-EXPORT void CALL Update (BOOL Wait) {
-	DWORD dwEvt;
-
+__forceinline void Update (BOOL Wait) {
+DWORD dwEvt;
 
 	if (!lpdsbuf) {
 		*AudioInfo.AI_STATUS_REG &= ~AI_STATUS_FIFO_FULL;
@@ -215,9 +249,9 @@ EXPORT void CALL Update (BOOL Wait) {
 		gUcode = 88;
 		ucodeDetected = TRUE;
 	}
-
-
-
+#ifdef _XBOX
+	dwEvt = WaitForMultipleObjects(NUMCAPTUREEVENTS, rghEvent, FALSE, 0);
+#else
 	if (Wait) {
 		dwEvt = MsgWaitForMultipleObjects(NUMCAPTUREEVENTS,rghEvent,FALSE,
 			INFINITE,QS_ALLINPUT);
@@ -225,27 +259,29 @@ EXPORT void CALL Update (BOOL Wait) {
 		dwEvt = MsgWaitForMultipleObjects(NUMCAPTUREEVENTS,rghEvent,FALSE,
 			0,QS_ALLINPUT);
 	}
+#endif
 	dwEvt -= WAIT_OBJECT_0;
+
 	if (dwEvt == NUMCAPTUREEVENTS) {
 		return;
 	}
 
 	switch (dwEvt) {
-	case 0: 
+	case WAIT_OBJECT_0: 
 		SndBuffer[0] = Buffer_Empty;
 		FillSectionWithSilence(0);
 		SndBuffer[1] = Buffer_Playing;
 		FillBuffer(2);
 		FillBuffer(0);
 		break;
-	case 1: 
+	case WAIT_OBJECT_0 + 1: 
 		SndBuffer[1] = Buffer_Empty;
 		FillSectionWithSilence(1);
 		SndBuffer[2] = Buffer_Playing;
 		FillBuffer(0);
 		FillBuffer(1);
 		break;
-	case 2: 
+	case WAIT_OBJECT_0 + 2: 
 		SndBuffer[2] = Buffer_Empty;
 		FillSectionWithSilence(2);
 		SndBuffer[0] = Buffer_Playing;
@@ -255,8 +291,10 @@ EXPORT void CALL Update (BOOL Wait) {
 	}
 }
 
+
 HWND hWndConfig;
 CRITICAL_SECTION CriticalSection;
+#ifndef _XBOX
 BOOL CALLBACK DeleteItemProc(HWND hwndDlg, UINT message, WPARAM wParam, LPARAM lParam) 
 { 
 	switch (message) 
@@ -291,7 +329,7 @@ BOOL CALLBACK DeleteItemProc(HWND hwndDlg, UINT message, WPARAM wParam, LPARAM l
 					DllAbout(AudioInfo.hwnd);
 					break;
 
-            }
+					}
 		break;
 		case WM_NOTIFY:
 		switch(LOWORD(wParam))
@@ -334,26 +372,35 @@ BOOL CALLBACK DeleteItemProc(HWND hwndDlg, UINT message, WPARAM wParam, LPARAM l
     } 
     return FALSE; 
 } 
+#endif
 
-EXPORT void CALL DllConfig ( HWND hParent )
+FUNC_TYPE(void) NAME_DEFINE(DllConfig) ( HWND hParent )
 {
+#ifndef _XBOX
 	if (hWndConfig == NULL)
 	{
 	hWndConfig = CreateDialog(AudioInfo.hinst, MAKEINTRESOURCE(IDD_DIALOG1), AudioInfo.hwnd, (DLGPROC)DeleteItemProc);
 	ShowWindow(hWndConfig, SW_SHOW);
 	}
+#endif
+}
+
+FUNC_TYPE(void) NAME_DEFINE(DllTest) ( HWND hParent )
+{
 }
 
 CRITICAL_SECTION CriticalSection2;
-EXPORT void CALL AiUpdate (BOOL Wait) 
+FUNC_TYPE(void) NAME_DEFINE(AiUpdate) (BOOL Wait) 
 {
 
 #ifndef THREADED
 	Update (Wait&Playing);
+#ifdef _XBOX
+	DirectSoundDoWork();
+#endif
 	PlayIt();
 #endif
 	
-
 	if (SyncSpeed && Playing)
 		if (
 			(SndBuffer[2] == Buffer_Full)
@@ -362,27 +409,31 @@ EXPORT void CALL AiUpdate (BOOL Wait)
 			)
 		{
 			Sleep(10);
-
 		}
 }
 
-EXPORT void CALL CloseDLL (void)
+FUNC_TYPE(void) NAME_DEFINE(CloseDLL) (void)
 {
+#ifndef _XBOX
 #ifdef THREADED
 	TerminateThread (handleAudioThread, 0);
 #endif
 
 	if (lpdsbuf) { 
-        IDirectSoundBuffer8_Stop(lpdsbuf);
-		IDirectSoundBuffer8_Release(lpdsbuf);
+        DSB_Stop(lpdsbuf);
+		DSB_Release(lpdsbuf);
         lpdsbuf = NULL;
 	}
     if ( lpds ) {
-		IDirectSound8_Release(lpds);
+		DS_Release(lpds);
         lpds = NULL;
 	}
+	#endif
 }
 
+#ifdef _XBOX
+extern void DisplayError (char *Message);
+#else
 void __cdecl DisplayError (char * Message, ...) {
 	char Msg[400];
 	va_list ap;
@@ -392,6 +443,8 @@ void __cdecl DisplayError (char * Message, ...) {
 	va_end( ap );
 	MessageBox(AudioInfo.hwnd,Msg,"Error",MB_OK|MB_ICONEXCLAMATION);
 }
+#endif
+
 extern void PlayIt();
 
 DWORD WINAPI AudioThreadProc (void) 
@@ -403,7 +456,9 @@ DWORD WINAPI AudioThreadProc (void)
 	{
 		EnterCriticalSection(&CriticalSection);
 		Update (0);
-		
+#ifdef _XBOX
+		DirectSoundDoWork();
+#endif
 		PlayIt();
 		LeaveCriticalSection(&CriticalSection);
 		Sleep(1);
@@ -411,26 +466,30 @@ DWORD WINAPI AudioThreadProc (void)
 	}
 }
 
-EXPORT void CALL DllAbout ( HWND hParent ) {
+
+FUNC_TYPE(void) NAME_DEFINE(DllAbout) ( HWND hParent ) 
+{
+#ifndef _XBOX
 	char Scratch[700];
 	char Caption[0x80];
 	strcpy(Caption, "About 1964 Audio version ");
 	strcat(Caption, PLUGIN_VERSION);
 	LoadString(AudioInfo.hinst, IDS_ABOUT, Scratch, 700);
 	MessageBox (hParent, Scratch, Caption, MB_OK);
+#endif
 }
 
-void StartAudio () {
+__forceinline void StartAudio () {
 	if (audioIsPlaying) return;
 	audioIsPlaying = TRUE;
 #ifdef THREADED
 		InitializeCriticalSection(&CriticalSection);
-	handleAudioThread = CreateThread (NULL, NULL, (LPTHREAD_START_ROUTINE)AudioThreadProc, NULL, NULL, &dwAudioThreadId);
+		handleAudioThread = CreateThread (NULL, NULL, (LPTHREAD_START_ROUTINE)AudioThreadProc, NULL, NULL, &dwAudioThreadId);
 #endif
 }
 
 
-void FillBuffer ( int buffer ) {
+__forceinline void FillBuffer ( int buffer ) {
 	//void AddToBuffer (void *sndptr, DWORD sndlen);
     DWORD dwBytesLocked;
     VOID *lpvData;
@@ -447,12 +506,12 @@ void FillBuffer ( int buffer ) {
 		AudioInfo.CheckInterrupts();
 
 		return; }
+	
 	if (SndBuffer[buffer] == Buffer_Empty) {
 		if (Snd1Len >= BufferSize) {
-			if (FAILED( IDirectSoundBuffer8_Lock(lpdsbuf, BufferSize * buffer,BufferSize, &lpvData, &dwBytesLocked,
-				NULL, NULL, 0  ) ) )
+			if (FAILED( DSB_Lock(lpdsbuf, BufferSize * buffer,BufferSize, &lpvData, &dwBytesLocked, NULL, NULL, 0  ) ) )
 			{
-				IDirectSoundBuffer8_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
+				DSB_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
 				//DisplayError("FAILED lock");
 				return;
 			}
@@ -461,12 +520,12 @@ void FillBuffer ( int buffer ) {
 			SndBuffer[buffer] = Buffer_Full;
 			Snd1ReadPos += dwBytesLocked;
 			Snd1Len -= dwBytesLocked;
-			IDirectSoundBuffer8_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
+			DSB_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
 		} else {
-			if (FAILED( IDirectSoundBuffer8_Lock(lpdsbuf, BufferSize * buffer,Snd1Len, &lpvData, &dwBytesLocked,
+			if (FAILED( DSB_Lock(lpdsbuf, BufferSize * buffer,Snd1Len, &lpvData, &dwBytesLocked,
 				NULL, NULL, 0  ) ) )
 			{
-				IDirectSoundBuffer8_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
+				DSB_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
 				//DisplayError("FAILED lock");
 				return;
 			}
@@ -476,14 +535,14 @@ void FillBuffer ( int buffer ) {
 			Snd1ReadPos += dwBytesLocked;
 			SpaceLeft = BufferSize - Snd1Len;
 			Snd1Len = 0;
-			IDirectSoundBuffer8_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
+			DSB_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
 		}
 	} else if (SndBuffer[buffer] == Buffer_HalfFull) {
 		if (Snd1Len >= SpaceLeft) {
-			if (FAILED( IDirectSoundBuffer8_Lock(lpdsbuf, (BufferSize * (buffer + 1)) - SpaceLeft ,SpaceLeft, &lpvData,
+			if (FAILED( DSB_Lock(lpdsbuf, (BufferSize * (buffer + 1)) - SpaceLeft ,SpaceLeft, &lpvData,
 				&dwBytesLocked, NULL, NULL, 0  ) ) )
 			{
-				IDirectSoundBuffer8_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
+				DSB_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
 				//DisplayError("FAILED lock");
 				return;
 			}
@@ -492,12 +551,12 @@ void FillBuffer ( int buffer ) {
 			SndBuffer[buffer] = Buffer_Full;
 			Snd1ReadPos += dwBytesLocked;
 			Snd1Len -= dwBytesLocked;
-			IDirectSoundBuffer8_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
+			DSB_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
 		} else {
-			if (FAILED( IDirectSoundBuffer8_Lock(lpdsbuf, (BufferSize * (buffer + 1)) - SpaceLeft,Snd1Len, &lpvData, &dwBytesLocked,
+			if (FAILED( DSB_Lock(lpdsbuf, (BufferSize * (buffer + 1)) - SpaceLeft,Snd1Len, &lpvData, &dwBytesLocked,
 				NULL, NULL, 0  ) ) )
 			{
-				IDirectSoundBuffer8_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
+				DSB_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
 				//DisplayError("FAILED lock");
 				return;
 			}
@@ -507,7 +566,7 @@ void FillBuffer ( int buffer ) {
 			Snd1ReadPos += dwBytesLocked;
 			SpaceLeft = SpaceLeft - Snd1Len;
 			Snd1Len = 0;
-			IDirectSoundBuffer8_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
+			DSB_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
 		}
 	}
 
@@ -517,45 +576,60 @@ void FillBuffer ( int buffer ) {
 		*AudioInfo.MI_INTR_REG |= MI_INTR_AI;
 		AudioInfo.CheckInterrupts();
 	}
+
+	
 }
 
-BOOL FillBufferWithSilence( LPDIRECTSOUNDBUFFER lpDsb ) {
+__forceinline BOOL FillBufferWithSilence( LPDIRECTSOUNDBUFFER lpDsb ) {
     WAVEFORMATEX    wfx;
     DWORD           dwSizeWritten;
-
+	
     PBYTE   pb1;
     DWORD   cb1;
 
-    if ( FAILED( IDirectSoundBuffer8_GetFormat(lpDsb, &wfx, sizeof( WAVEFORMATEX ), &dwSizeWritten ) ) ) {
+#ifndef _XBOX
+	//	freakdave - GetFormat Not supported on XBOX
+    if ( FAILED( DSB_GETFORMAT(/*lpDsb*/lpdsbuf, &wfx, sizeof( WAVEFORMATEX ), &dwSizeWritten ) ) ) {
         return FALSE;
 	}
+#else
+	//freakdave - IDirectSoundBuffer_GetFormat wrapping
+	memset( &wfx, (int)&dwSizeWritten, sizeof(WAVEFORMATEX));
+	wfx.wFormatTag = WAVE_FORMAT_PCM;
+	wfx.nChannels = 2;
+	wfx.nSamplesPerSec = Frequency;
+	wfx.wBitsPerSample = 16;
+	wfx.nBlockAlign = wfx.wBitsPerSample / 8 * wfx.nChannels;
+	wfx.nAvgBytesPerSec = wfx.nSamplesPerSec * wfx.nBlockAlign;
+#endif
 
-    if ( SUCCEEDED( IDirectSoundBuffer8_Lock(lpDsb,0,0,(LPVOID*)&pb1,&cb1,NULL,NULL,DSBLOCK_ENTIREBUFFER))) {
+
+    if ( SUCCEEDED( DSB_Lock(lpDsb,0,0,(LPVOID*)&pb1,&cb1,NULL,NULL,DSBLOCK_ENTIREBUFFER))) {
         FillMemory( pb1, cb1, ( wfx.wBitsPerSample == 8 ) ? 128 : 0 );
-
-        IDirectSoundBuffer8_Unlock(lpDsb, pb1, cb1, NULL, 0 );
+		
+        DSB_Unlock(lpDsb, pb1, cb1, NULL, 0 );
         return TRUE;
     }
 
     return FALSE;
 }
 
-void FillSectionWithSilence( int buffer ) {
+__forceinline void FillSectionWithSilence( int buffer ) {
     DWORD dwBytesLocked;
     VOID *lpvData;
 
-	if (FAILED( IDirectSoundBuffer8_Lock(lpdsbuf, BufferSize * buffer,BufferSize, &lpvData, &dwBytesLocked,
+	if (FAILED( DSB_Lock(lpdsbuf, BufferSize * buffer,BufferSize, &lpvData, &dwBytesLocked,
 		NULL, NULL, 0  ) ) )
 	{
-		IDirectSoundBuffer8_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
-		//DisplayError("IDirectSoundBuffer8_Unlock");
+		DSB_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
+		//DisplayError("IDirectSoundBuffer_Unlock");
 		return;
 	}
     FillMemory( lpvData, dwBytesLocked, 0 );
-	IDirectSoundBuffer8_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
+	DSB_Unlock(lpdsbuf, lpvData, dwBytesLocked, NULL, 0 );
 }
 
-EXPORT void CALL GetDllInfo ( PLUGIN_INFO * PluginInfo )
+FUNC_TYPE(void) NAME_DEFINE(GetDllInfo) ( PLUGIN_INFO * PluginInfo )
 { 
 	PluginInfo->Version = 0x0101;
 	PluginInfo->Type    = PLUGIN_TYPE_AUDIO;
@@ -575,10 +649,10 @@ EXPORT void CALL GetDllInfo ( PLUGIN_INFO * PluginInfo )
 extern DWORD imem_DMA_dst;
 extern DWORD imem_DMA_src;
 
-EXPORT BOOL CALL InitiateAudio (AUDIO_INFO Audio_Info) 
+FUNC_TYPE(BOOL) NAME_DEFINE(InitiateAudio) (AUDIO_INFO Audio_Info) 
 {
-	HRESULT hr;
-	int count;
+//	HRESULT hr;
+//	int count;
 	ROMHeader header;
 	//void InitLogging ();
 	static int initvariables=0;
@@ -611,11 +685,11 @@ EXPORT BOOL CALL InitiateAudio (AUDIO_INFO Audio_Info)
 	imem_DMA_dst = 0;
 	imem_DMA_src = 0;
 	rsp_reset();
-
+	
 	return TRUE;
 }
 
-EXPORT void CALL ProcessAList(void) 
+FUNC_TYPE(void) NAME_DEFINE(ProcessAList) (void) 
 {
 #ifdef ENABLE_TRACE_COMPARE
 	rsp_run_with_trace();
@@ -626,7 +700,7 @@ EXPORT void CALL ProcessAList(void)
 }
 
 DWORD SPCycleCount=0;
-EXPORT DWORD CALL ProcessAListCountCycles(void) 
+FUNC_TYPE(DWORD) NAME_DEFINE(ProcessAListCountCycles) (void) 
 {
 #define CF 8
 
@@ -642,7 +716,7 @@ EXPORT DWORD CALL ProcessAListCountCycles(void)
 	return SPCycleCount/CF;
 }
 
-EXPORT void CALL RomClosed (void) 
+FUNC_TYPE(void) NAME_DEFINE(RomClosed) (void) 
 {
 //	ucodeDetected = FALSE;
 //	gUcode = UNDEFINED_UCODE;
@@ -650,11 +724,14 @@ EXPORT void CALL RomClosed (void)
 	if (!audioIsPlaying) return;
 	audioIsPlaying = FALSE;
 #ifdef THREADED
+#ifndef _XBOX
 	TerminateThread (handleAudioThread, 0);
+#else
+	ExitThread(0);
+#endif
 #endif
 
-
-    IDirectSoundBuffer8_Stop(lpdsbuf);
+    DSB_Stop(lpdsbuf);
 	Dacrate = 0;
 	Playing = FALSE;	
 	SndBuffer[0] = Buffer_Empty;
@@ -665,49 +742,113 @@ EXPORT void CALL RomClosed (void)
 	*AudioInfo.MI_INTR_REG |= MI_INTR_AI;
 }
 
+#ifdef _XBOX
+__forceinline BOOL SetupDSoundBuffers(void) {
+//	LPDIRECTSOUNDBUFFER lpdsb;
+
+#else
 void SetupDSoundBuffers(void) {
 	LPDIRECTSOUNDBUFFER lpdsb;
-    DSBUFFERDESC        dsPrimaryBuff, dsbdesc;
+	DSBUFFERDESC        dsbdesc;
+    
+#endif
+
+    DSBUFFERDESC        dsPrimaryBuff;
     WAVEFORMATEX        wfm;
     HRESULT             hr;
 	int count;
 
-    if (lpdsbuf) { CloseDLL(); InitiateAudio(AudioInfo);}
+#ifdef _XBOX
+  if (lpdsbuf) { NAME_DEFINE(CloseDLL)(); NAME_DEFINE(InitiateAudio)(AudioInfo);}
+#else
+	if (lpdsbuf) { CloseDLL(); InitiateAudio(AudioInfo);}
+#endif
 
-    if ( FAILED( hr = DirectSoundCreate( NULL, &lpds, NULL ) ) ) {
+  	if ( FAILED( hr = DirectSoundCreate( NULL, &lpds, NULL ) ) ) {
         return FALSE;
 	}
 
-    if ( FAILED( hr = IDirectSound8_SetCooperativeLevel(lpds, AudioInfo.hwnd, DSSCL_PRIORITY   ))) {
+  	if ( FAILED( hr = IDirectSound8_SetCooperativeLevel(lpds, AudioInfo.hwnd, DSSCL_PRIORITY   ))) {
         return FALSE;
 	}
-    for ( count = 0; count < NUMCAPTUREEVENTS; count++ ) {
+    
+	for ( count = 0; count < NUMCAPTUREEVENTS; count++ ) {
         rghEvent[count] = CreateEvent( NULL, FALSE, FALSE, NULL );
         if (rghEvent[count] == NULL ) { return FALSE; }
-    }
-
+  }
+#ifndef _XBOX
 	memset( &dsPrimaryBuff, 0, sizeof( DSBUFFERDESC ) ); 
     
 	dsPrimaryBuff.dwSize        = sizeof( DSBUFFERDESC ); 
-    dsPrimaryBuff.dwFlags       = DSBCAPS_PRIMARYBUFFER; 
-    dsPrimaryBuff.dwBufferBytes = 0;  
-    dsPrimaryBuff.lpwfxFormat   = NULL; 
-    memset( &wfm, 0, sizeof( WAVEFORMATEX ) ); 
+  dsPrimaryBuff.dwFlags       = DSBCAPS_PRIMARYBUFFER; 
+  dsPrimaryBuff.dwBufferBytes = 0;  
+  dsPrimaryBuff.lpwfxFormat   = NULL; 
+#endif
+	//freakdave - Set up Wave format structure
+  memset( &wfm, 0, sizeof( WAVEFORMATEX ) );
 
 	wfm.wFormatTag = WAVE_FORMAT_PCM;
 	wfm.nChannels = 2;
+#ifdef _XBOX
+	wfm.nSamplesPerSec = Frequency;
+#else
 	wfm.nSamplesPerSec = 44100;
+#endif
 	wfm.wBitsPerSample = 16;
 	wfm.nBlockAlign = wfm.wBitsPerSample / 8 * wfm.nChannels;
 	wfm.nAvgBytesPerSec = wfm.nSamplesPerSec * wfm.nBlockAlign;
 
-	hr = IDirectSound8_CreateSoundBuffer(lpds,&dsPrimaryBuff, &lpdsb, NULL);
-	
-	if (SUCCEEDED ( hr ) ) {
-		IDirectSoundBuffer8_SetFormat(lpdsb, &wfm );
-	    IDirectSoundBuffer8_Play(lpdsb, 0, 0, DSBPLAY_LOOPING );
-	}
+#ifdef _XBOX
+	//freakdave - Set up DSBUFFERDESC structure
+	memset( &dsPrimaryBuff, 0, sizeof( DSBUFFERDESC ) ); 
+	dsPrimaryBuff.dwSize        = sizeof( DSBUFFERDESC ); 
+    //dsPrimaryBuff.dwFlags       = DSBCAPS_PRIMARYBUFFER; //freakdave - There is no primary sound buffer on XBOX
+	dsPrimaryBuff.dwFlags		= DSBCAPS_CTRLPOSITIONNOTIFY;
+    dsPrimaryBuff.dwBufferBytes = BufferSize * 3;  
+    dsPrimaryBuff.lpwfxFormat   = &wfm; 
 
+	hr = IDirectSound8_CreateSoundBuffer(lpds,&dsPrimaryBuff, &lpdsbuf, NULL);
+#else
+	hr = IDirectSound8_CreateSoundBuffer(lpds,&dsPrimaryBuff, &lpdsb, NULL);
+#endif
+	if (SUCCEEDED ( hr ) ) {
+#ifdef _XBOX
+		if (bAudioBoostMusyX) {
+		DSMIXBINVOLUMEPAIR dsmbvp[8] = {
+		{DSMIXBIN_FRONT_LEFT, DSBVOLUME_MAX},
+		{DSMIXBIN_FRONT_RIGHT, DSBVOLUME_MAX},
+		{DSMIXBIN_FRONT_CENTER, DSBVOLUME_MAX},
+		{DSMIXBIN_FRONT_CENTER, DSBVOLUME_MAX},
+		{DSMIXBIN_BACK_LEFT, DSBVOLUME_MAX},
+		{DSMIXBIN_BACK_RIGHT, DSBVOLUME_MAX},
+		{DSMIXBIN_LOW_FREQUENCY, DSBVOLUME_MAX},
+		{DSMIXBIN_LOW_FREQUENCY, DSBVOLUME_MAX}};
+	    
+		DSMIXBINS dsmb;
+
+		dsmb.dwMixBinCount = 8;
+		dsmb.lpMixBinVolumePairs = dsmbvp;
+
+		DSB_SetFormat(lpdsbuf, &wfm );
+		DSB_SetVolume(lpdsbuf, DSBVOLUME_MAX);
+		DSB_SetHeadroom(lpdsbuf, DSBHEADROOM_MIN);
+		DSB_SetMixBins(lpdsbuf, &dsmb);
+		DSB_Play(lpdsbuf, 0, 0, DSBPLAY_LOOPING );
+		}
+		else
+#endif
+		{
+		DSB_SetFormat(lpdsbuf, &wfm );
+		DSB_Play(lpdsbuf, 0, 0, DSBPLAY_LOOPING );
+		}
+		
+	}
+#ifdef _XBOX
+	else
+	{
+		OutputDebugString("Failed to create Play buffer\n");
+	}
+#else
 	wfm.nSamplesPerSec = Frequency;
 	wfm.wBitsPerSample = 16;
 	wfm.nBlockAlign = wfm.wBitsPerSample / 8 * wfm.nChannels;
@@ -722,6 +863,8 @@ void SetupDSoundBuffers(void) {
 	if ( FAILED( hr = IDirectSound8_CreateSoundBuffer(lpds, &dsbdesc, &lpdsbuf, NULL ) ) ) {
 		DisplayError("Failed in creation of Play buffer 1");	
 	}
+#endif
+
 	FillBufferWithSilence( lpdsbuf );
 
     rgdscbpn[0].dwOffset = ( BufferSize ) - 1;
@@ -732,22 +875,32 @@ void SetupDSoundBuffers(void) {
     rgdscbpn[2].hEventNotify = rghEvent[2];
     rgdscbpn[3].dwOffset = DSBPN_OFFSETSTOP;
     rgdscbpn[3].hEventNotify = rghEvent[3];
-
-    if ( FAILED( hr = IDirectSound8_QueryInterface(lpdsbuf, &IID_IDirectSoundNotify, ( VOID ** )&lpdsNotify ) ) ) {
+	
+#ifdef _XBOX
+	if ( FAILED( hr = DSB_SetNotificationPositions(lpdsbuf, NUMCAPTUREEVENTS, rgdscbpn ) ) ) {
+		OutputDebugString("IDirectSoundBuffer_SetNotificationPositions: Failed\n");
+		return FALSE;
+	}
+#else
+	if ( FAILED( hr = DS_QueryInterface(lpdsbuf, &IID_IDirectSoundNotify, ( VOID ** )&lpdsNotify ) ) ) {
 		DisplayError("IDirectSound8_QueryInterface: Failed\n");
 		return;
 	}
 
     // Set capture buffer notifications.
-    if ( FAILED( hr = IDirectSoundNotify_SetNotificationPositions(lpdsNotify, NUMCAPTUREEVENTS, rgdscbpn ) ) ) {
+    if ( FAILED( hr = DSN_SetNotificationPositions(lpdsNotify, NUMCAPTUREEVENTS, rgdscbpn ) ) ) {
 		DisplayError("IDirectSoundNotify_SetNotificationPositions: Failed");
 		return;
     }
-
+#endif
 	//AddEffect();
+
+#ifdef _XBOX
+	return TRUE;
+#endif
 }
 
-void Soundmemcpy(void * dest, const void * src, size_t count) {
+__forceinline void Soundmemcpy(void * dest, const void * src, size_t count) {
 	if (AudioInfo.MemoryBswaped) {
 		if (ReverseStereo)
 		{
@@ -820,7 +973,7 @@ void Soundmemcpy(void * dest, const void * src, size_t count) {
 }
 
 
-void ROM_ByteSwap_3210(void *v, DWORD dwLen)
+__forceinline void ROM_ByteSwap_3210(void *v, DWORD dwLen)
 {
 	__asm
 	{
@@ -849,7 +1002,7 @@ top:
 }
 
 
-void ROM_GetRomNameFromHeader(TCHAR * szName, ROMHeader * pHdr)
+__forceinline void ROM_GetRomNameFromHeader(TCHAR * szName, ROMHeader * pHdr)
 {
 	TCHAR * p;
 
@@ -869,6 +1022,7 @@ void rdp_enddl(int val)
 //empty.
 }
 
+#ifndef _XBOX
 #ifdef _DEBUG
 void (__cdecl *_DebuggerMsgCallBackFunc) (char *msg) = NULL;
 EXPORT void CALL SetDebuggerCallBack(void (_cdecl *DbgCallBackFun)(char *msg))
@@ -905,3 +1059,11 @@ dsEffect.dwReserved2 = 0;
 //if (FAILED(hr = IDirectSoundBuffer8_SetFX(lpdsbuf, 1, &dsEffect, &dwResults)))
 //    MessageBox(0, "Add effect failed", "", 0);//return hr;
 }
+#endif
+
+#ifdef _XBOX
+FUNC_TYPE(void) NAME_DEFINE(AudioBoost) (BOOL Boost)
+{
+	bAudioBoostMusyX = Boost;
+}
+#endif

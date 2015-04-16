@@ -78,7 +78,7 @@ _u32 ComputeCRC32(const char *buf, int len)
 	if (buf == NULL) return 0L;
 
 #ifndef BIG_ENDIAN
-	for( i=0; i<len/4; i++ )
+	for( i=0; i<(_u32)(len/4); i++ )
 	{
 		crc += *(_u32*)(buf+i);
 		crc ^= i;
@@ -131,7 +131,11 @@ int LookupUcode()
 
 #ifdef LOG_UCODES
 	{
+#ifdef _XBOX
+		FILE	*fp = File_Open("T:\\Misc\\audioUcodes.log","at");
+#else
 		FILE	*fp = File_Open("audioUcodes.log","at");
+#endif
 		if( fp )
 		{
 			fprintf(fp, "0x%08X,\t0x%08X,\t1,\t// %s\n", crc1, crc2, gameName);
@@ -198,8 +202,13 @@ void DetectMicrocode()
 void rsp_reset()
 {
 #ifdef TEST_MODE
+#ifdef _XBOX
+	if( !dfile )
+		dfile = File_Open("T:\\Misc\\DynaAudioLog.log","wt");
+#else
 	if( !dfile )
 		dfile = File_Open("DynaAudioLog.log","wt");
+#endif
 #endif // TEST_MODE
 
     memset(&state, 0, sizeof(state));
