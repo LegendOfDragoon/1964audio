@@ -43,7 +43,7 @@
 #define DSB_Play	IDirectSoundBuffer8_Play
 #define DSB_Stop	IDirectSoundBuffer8_Stop
 #define DSB_GetStatus	IDirectSoundBuffer8_GetStatus
-#define DSB_GETFORMAT	IDirectSoundBuffer8_GetFormat
+#define DSB_GetFormat	IDirectSoundBuffer8_GetFormat
 #define DSB_SetFormat	IDirectSoundBuffer8_SetFormat
 #define DSB_Lock	IDirectSoundBuffer8_Lock
 #define DSB_Unlock	IDirectSoundBuffer8_Unlock
@@ -267,21 +267,33 @@ DWORD dwEvt;
 	}
 
 	switch (dwEvt) {
+#ifdef _XBOX
 	case WAIT_OBJECT_0: 
+#else
+	case 0:
+#endif
 		SndBuffer[0] = Buffer_Empty;
 		FillSectionWithSilence(0);
 		SndBuffer[1] = Buffer_Playing;
 		FillBuffer(2);
 		FillBuffer(0);
 		break;
+#ifdef _XBOX
 	case WAIT_OBJECT_0 + 1: 
+#else
+	case 1:
+#endif
 		SndBuffer[1] = Buffer_Empty;
 		FillSectionWithSilence(1);
 		SndBuffer[2] = Buffer_Playing;
 		FillBuffer(0);
 		FillBuffer(1);
 		break;
+#ifdef _XBOX
 	case WAIT_OBJECT_0 + 2: 
+#else
+	case 2:
+#endif
 		SndBuffer[2] = Buffer_Empty;
 		FillSectionWithSilence(2);
 		SndBuffer[0] = Buffer_Playing;
@@ -428,7 +440,7 @@ FUNC_TYPE(void) NAME_DEFINE(CloseDLL) (void)
 		DS_Release(lpds);
         lpds = NULL;
 	}
-	#endif
+#endif
 }
 
 #ifdef _XBOX
@@ -589,7 +601,7 @@ __forceinline BOOL FillBufferWithSilence( LPDIRECTSOUNDBUFFER lpDsb ) {
 
 #ifndef _XBOX
 	//	freakdave - GetFormat Not supported on XBOX
-    if ( FAILED( DSB_GETFORMAT(/*lpDsb*/lpdsbuf, &wfx, sizeof( WAVEFORMATEX ), &dwSizeWritten ) ) ) {
+    if ( FAILED( DSB_GetFormat(lpDsb, &wfx, sizeof( WAVEFORMATEX ), &dwSizeWritten ) ) ) {
         return FALSE;
 	}
 #else
@@ -811,7 +823,8 @@ void SetupDSoundBuffers(void) {
 #else
 	hr = IDirectSound8_CreateSoundBuffer(lpds,&dsPrimaryBuff, &lpdsb, NULL);
 #endif
-	if (SUCCEEDED ( hr ) ) {
+	if (SUCCEEDED ( hr ) ) 
+	{
 #ifdef _XBOX
 		if (bAudioBoostMusyX) {
 		DSMIXBINVOLUMEPAIR dsmbvp[8] = {
@@ -836,12 +849,14 @@ void SetupDSoundBuffers(void) {
 		DSB_Play(lpdsbuf, 0, 0, DSBPLAY_LOOPING );
 		}
 		else
-#endif
 		{
 		DSB_SetFormat(lpdsbuf, &wfm );
 		DSB_Play(lpdsbuf, 0, 0, DSBPLAY_LOOPING );
 		}
-		
+#else
+		DSB_SetFormat(lpdsb, &wfm );
+		DSB_Play(lpdsb, 0, 0, DSBPLAY_LOOPING );
+#endif
 	}
 #ifdef _XBOX
 	else
