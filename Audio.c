@@ -180,7 +180,7 @@ FUNC_TYPE(void) NAME_DEFINE(AiLenChanged) (void) {
 	if (Playing) {
 		for (count = 0; count < 3; count ++) {
 			if (SndBuffer[count] == Buffer_Playing) {
-				offset = (count + 1) & 3;
+				offset = (count + 1) % 3;
 			}
 		}
 	} else {
@@ -188,22 +188,22 @@ FUNC_TYPE(void) NAME_DEFINE(AiLenChanged) (void) {
 	}
 
 	for (count = 0; count < 3; count ++) {
-		if (SndBuffer[(count + offset) & 3] == Buffer_HalfFull) {
-			FillBuffer((count + offset) & 3);
+		if (SndBuffer[(count + offset) % 3] == Buffer_HalfFull) {
+			FillBuffer((count + offset) % 3);
 			count = 3;
 		}
 	}
 	for (count = 0; count < 3; count ++) {
-		if (SndBuffer[(count + offset) & 3] == Buffer_Full) {
-			FillBuffer((count + offset + 1) & 3);
-			FillBuffer((count + offset + 2) & 3);
+		if (SndBuffer[(count + offset) % 3] == Buffer_Full) {
+			FillBuffer((count + offset + 1) % 3);
+			FillBuffer((count + offset + 2) % 3);
 			count = 20;
 		}
 	}
 	if (count < 10) {
-		FillBuffer((0 + offset) & 3);
-		FillBuffer((1 + offset) & 3);
-		FillBuffer((2 + offset) & 3);
+		FillBuffer((0 + offset) % 3);
+		FillBuffer((1 + offset) % 3);
+		FillBuffer((2 + offset) % 3);
 	}
 }
 
