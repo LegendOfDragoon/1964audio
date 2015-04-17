@@ -107,8 +107,8 @@ LPDIRECTSOUND8        lpds;
 #ifndef _XBOX
 LPDIRECTSOUNDNOTIFY8  lpdsNotify;
 #endif
-HANDLE               rghEvent[NUMCAPTUREEVENTS];
-DSBPOSITIONNOTIFY    rgdscbpn[NUMCAPTUREEVENTS];
+HANDLE               rghEvent[NUMCAPTUREEVENTS + 1];
+DSBPOSITIONNOTIFY    rgdscbpn[NUMCAPTUREEVENTS + 1];
 
 extern int gUcode;
 FUNC_TYPE(void) NAME_DEFINE(AiDacrateChanged) (int SystemType) {
